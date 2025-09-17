@@ -1,0 +1,20 @@
+[package]
+name = "uricrypt"
+version = "0.1.8"
+edition = "2021"
+authors = ["Frank Denis <github@pureftpd.org>"]
+description = "Hierarchy-preserving deterministic URI encryption"
+keywords = ["uri", "encryption", "hierarchy", "crypto", "turboshake"]
+license = "MIT"
+homepage = "https://github.com/jedisct1/rust-uricrypt"
+repository = "https://github.com/jedisct1/rust-uricrypt"
+categories = ["cryptography"]
+readme = "README.md"
+
+[lib]
+name = "uricrypt"
+path = "src/lib.rs"
+
+[dependencies]
+sha3 = "0.10"
+base64 = "0.22"
