@@ -17,7 +17,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-uricrypt = "0.1.7"
+uricrypt = "0.1"
 ```
 
 ## Usage
