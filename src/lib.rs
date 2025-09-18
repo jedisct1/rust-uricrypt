@@ -156,15 +156,6 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// );
 /// ```
 pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
-    // Check if key has even length and both halves are identical
-    if secret_key.len() >= 2 && secret_key.len() % 2 == 0 {
-        let mid = secret_key.len() / 2;
-        let (first_half, second_half) = secret_key.split_at(mid);
-        if first_half == second_half {
-            panic!("Key validation failed: both halves of the key are identical");
-        }
-    }
-
     let (scheme, uri_parts) = split_uri(uri);
 
     // If no components, return empty string
@@ -293,15 +284,6 @@ pub fn decrypt_uri(
     secret_key: &[u8],
     context: &[u8],
 ) -> Result<String, String> {
-    // Check if key has even length and both halves are identical
-    if secret_key.len() >= 2 && secret_key.len() % 2 == 0 {
-        let mid = secret_key.len() / 2;
-        let (first_half, second_half) = secret_key.split_at(mid);
-        if first_half == second_half {
-            return Err("Key validation failed: both halves of the key are identical".to_string());
-        }
-    }
-
     // Check if this is a path-only URI (starts with '/')
     let (scheme, encrypted_part) = if let Some(stripped) = encrypted_uri.strip_prefix('/') {
         // Path-only URI - skip the leading '/'
