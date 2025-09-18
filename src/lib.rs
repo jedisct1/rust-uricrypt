@@ -115,14 +115,12 @@ impl<'a> Iterator for URIComponentIterator<'a> {
             return None;
         }
 
-        // Find next component
-        let search_start = self.position;
-        for (i, ch) in self.rest[search_start..].char_indices() {
-            if ch == '/' {
-                let component = &self.rest[self.position..search_start + i + 1];
-                self.position = search_start + i + 1;
-                return Some(component);
-            }
+        // Find next component ending with '/'
+        if let Some(slash_pos) = self.rest[self.position..].find('/') {
+            let end = self.position + slash_pos + 1;
+            let component = &self.rest[self.position..end];
+            self.position = end;
+            return Some(component);
         }
 
         // Last component (no trailing slash)
@@ -141,9 +139,8 @@ impl<'a> Iterator for URIComponentIterator<'a> {
 /// Returns a structure that provides the scheme (if present) and allows
 /// iteration over components without allocation.
 pub(crate) fn split_uri(uri: &str) -> URIComponents<'_> {
-    // Check if this is a URI with a scheme
     if let Some(scheme_end) = uri.find("://") {
-        let scheme = &uri[..scheme_end + 3]; // Include "://"
+        let scheme = &uri[..scheme_end + 3];
         return URIComponents {
             uri,
             scheme: Some(scheme),
@@ -151,7 +148,6 @@ pub(crate) fn split_uri(uri: &str) -> URIComponents<'_> {
         };
     }
 
-    // No scheme found - treat as path-only URI
     URIComponents {
         uri,
         scheme: None,
@@ -238,7 +234,6 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
 
     let mut encrypted_uri = Vec::with_capacity(uri.len() * 2);
 
-    // Create base hasher with constant parts (secret key and context)
     let mut base_hasher = TurboShake128::from_core(TurboShake128Core::new(0x1F));
     base_hasher.update(&[secret_key.len() as u8]);
     base_hasher.update(secret_key);
@@ -250,21 +245,17 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
     let mut base_keystream_hasher = base_hasher.clone();
     base_keystream_hasher.update(b"KS");
 
-    // Iterate directly over components without collecting
     for part in components {
         let part_bytes = part.as_bytes();
 
-        // Calculate padding for base64 alignment
         let total_unpadded = SIV_SIZE + part_bytes.len();
         let padding = (3 - (total_unpadded % 3)) % 3;
 
-        // Update the hasher with this component's data
         components_hasher.update(part_bytes);
 
         let mut siv = [0u8; SIV_SIZE];
         components_hasher.clone().finalize_xof().read(&mut siv);
 
-        // Generate keystream and encrypt
         let mut keystream_hasher = base_keystream_hasher.clone();
         keystream_hasher.update(&siv);
 
@@ -280,13 +271,8 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
         encrypted_uri.extend_from_slice(&encrypted_part);
     }
 
-    // Format output based on whether there's a scheme
-    if let Some(scheme) = scheme {
-        format!("{}{}", scheme, URL_SAFE_NO_PAD.encode(encrypted_uri))
-    } else {
-        // Prepend '/' to indicate this is a path-only URI
-        format!("/{}", URL_SAFE_NO_PAD.encode(encrypted_uri))
-    }
+    let prefix = scheme.unwrap_or("/");
+    format!("{}{}", prefix, URL_SAFE_NO_PAD.encode(encrypted_uri))
 }
 
 /// Decrypts a URI that was encrypted with `encrypt_uri`.
@@ -355,27 +341,21 @@ pub fn decrypt_uri(
     secret_key: &[u8],
     context: &[u8],
 ) -> Result<String, String> {
-    // Check if this is a path-only URI (starts with '/')
     let (scheme, encrypted_part) = if let Some(stripped) = encrypted_uri.strip_prefix('/') {
-        // Path-only URI - skip the leading '/'
         (None, stripped)
     } else if let Some(scheme_end) = encrypted_uri.find("://") {
-        // URI with scheme
         let scheme = &encrypted_uri[..scheme_end + 3];
         let encrypted = &encrypted_uri[scheme_end + 3..];
 
-        // If nothing after scheme, just return the scheme
         if encrypted.is_empty() {
             return Ok(scheme.to_string());
         }
 
         (Some(scheme), encrypted)
     } else {
-        // Invalid format - use generic error to prevent oracle attacks
         return Err("Decryption failed".to_string());
     };
 
-    // Decode the encrypted part
     let encrypted_bytes = URL_SAFE_NO_PAD
         .decode(encrypted_part)
         .map_err(|_| "Decryption failed".to_string())?;
@@ -383,14 +363,12 @@ pub fn decrypt_uri(
     let mut decrypted_components = Vec::<String>::new();
     let mut pos = 0;
 
-    // Create base hasher with constant parts (secret key and context)
     let mut base_hasher = TurboShake128::from_core(TurboShake128Core::new(0x1F));
     base_hasher.update(&[secret_key.len() as u8]);
     base_hasher.update(secret_key);
     base_hasher.update(&[context.len() as u8]);
     base_hasher.update(context);
 
-    // This hasher will accumulate state from previous components
     let mut components_hasher = base_hasher.clone();
     components_hasher.update(b"IV");
 
@@ -412,7 +390,6 @@ pub fn decrypt_uri(
 
         let mut component = Vec::with_capacity(64);
 
-        // Decrypt bytes until we find '/' or reach the end
         while pos < encrypted_bytes.len() {
             let mut keystream_byte = [0u8; 1];
             reader.read(&mut keystream_byte);
@@ -428,55 +405,35 @@ pub fn decrypt_uri(
             component.push(decrypted_byte);
 
             if decrypted_byte == b'/' {
-                // Found end of component, consume any remaining padding
                 let bytes_read = pos - component_start;
                 let total_len = SIV_SIZE + bytes_read;
                 let padding_needed = (3 - (total_len % 3)) % 3;
-
-                for _ in 0..padding_needed {
-                    if pos >= encrypted_bytes.len() {
-                        return Err("Decryption failed".to_string());
-                    }
-                    let mut keystream_byte = [0u8; 1];
-                    reader.read(&mut keystream_byte);
-                    if (encrypted_bytes[pos] ^ keystream_byte[0]) != 0 {
-                        return Err("Decryption failed".to_string());
-                    }
-                    pos += 1;
-                }
+                pos += padding_needed;
                 break;
             }
         }
 
-        // Validate the component
         if component.is_empty() {
             return Err("Decryption failed".to_string());
         }
 
-        // Update the hasher with this component's data
         components_hasher.update(&component);
 
-        // Compute the expected SIV for this component based on accumulated state
         let mut expected_siv = [0u8; SIV_SIZE];
         components_hasher
             .clone()
             .finalize_xof()
             .read(&mut expected_siv);
 
-        // Verify the SIV matches - this ensures proper chaining
         if expected_siv != siv {
             return Err("Decryption failed".to_string());
         }
 
-        // Check UTF-8 validity
         match std::str::from_utf8(&component) {
             Ok(comp_str) => {
                 decrypted_components.push(comp_str.to_string());
             }
-            Err(_) => {
-                // Invalid UTF-8 means decryption failed
-                return Err("Decryption failed".to_string());
-            }
+            Err(_) => return Err("Decryption failed".to_string()),
         }
     }
 
@@ -487,12 +444,11 @@ pub fn decrypt_uri(
     // Join all decrypted components
     let decrypted_uri = decrypted_components.join("");
 
-    // Format output based on whether there was a scheme
-    if let Some(scheme) = scheme {
-        Ok(format!("{}{}", scheme, decrypted_uri))
-    } else {
-        Ok(decrypted_uri)
-    }
+    // Prepend scheme if present
+    Ok(match scheme {
+        Some(s) => format!("{}{}", s, decrypted_uri),
+        None => decrypted_uri,
+    })
 }
 
 #[cfg(test)]
