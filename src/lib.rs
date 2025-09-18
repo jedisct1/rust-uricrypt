@@ -4,82 +4,159 @@ use sha3::{
     TurboShake128, TurboShake128Core,
 };
 
+/// Represents URI components that can be iterated without allocation.
+pub(crate) struct URIComponents<'a> {
+    uri: &'a str,
+    scheme: Option<&'a str>,
+    /// Start position for component extraction (after scheme if present)
+    rest_start: usize,
+}
+
+impl<'a> URIComponents<'a> {
+    /// Returns the scheme portion of the URI, if present.
+    pub fn scheme(&self) -> Option<&'a str> {
+        self.scheme
+    }
+}
+
+impl<'a> IntoIterator for URIComponents<'a> {
+    type Item = &'a str;
+    type IntoIter = URIComponentIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let rest = &self.uri[self.rest_start..];
+
+        // Handle empty rest
+        if rest.is_empty() {
+            return URIComponentIterator {
+                rest: "",
+                position: 0,
+                done: true,
+                is_absolute_path: false,
+                initial_slash_handled: false,
+            };
+        }
+
+        // For path-only URIs
+        if self.scheme.is_none() {
+            // Handle absolute paths that start with '/'
+            if self.uri.starts_with('/') {
+                if self.uri.len() == 1 {
+                    // Just a single "/"
+                    return URIComponentIterator {
+                        rest: "./",
+                        position: 0,
+                        done: false,
+                        is_absolute_path: false,     // Special case
+                        initial_slash_handled: true, // Don't emit "/" for this case
+                    };
+                }
+                return URIComponentIterator {
+                    rest: &self.uri[1..], // Skip leading '/'
+                    position: 0,
+                    done: false,
+                    is_absolute_path: true,
+                    initial_slash_handled: false, // Will emit "/" as first component
+                };
+            }
+            // Relative path - no leading slash to handle
+            return URIComponentIterator {
+                rest: self.uri,
+                position: 0,
+                done: false,
+                is_absolute_path: false,
+                initial_slash_handled: true, // No slash to emit
+            };
+        }
+
+        // URI with scheme - just iterate over rest
+        URIComponentIterator {
+            rest,
+            position: 0,
+            done: false,
+            is_absolute_path: false,
+            initial_slash_handled: true, // No initial slash for scheme URIs
+        }
+    }
+}
+
+/// Iterator over URI components without allocation.
+pub(crate) struct URIComponentIterator<'a> {
+    rest: &'a str,
+    position: usize,
+    done: bool,
+    is_absolute_path: bool,
+    initial_slash_handled: bool,
+}
+
+impl<'a> Iterator for URIComponentIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        // Handle leading slash for absolute paths
+        if self.is_absolute_path && !self.initial_slash_handled {
+            self.initial_slash_handled = true;
+            // Emit "/" as the first component for absolute paths
+            return Some("/");
+        }
+
+        // Special case for single "/"
+        if self.rest == "./" && !self.initial_slash_handled {
+            self.done = true;
+            return Some("./");
+        }
+
+        if self.position >= self.rest.len() {
+            self.done = true;
+            return None;
+        }
+
+        // Find next component
+        let search_start = self.position;
+        for (i, ch) in self.rest[search_start..].char_indices() {
+            if ch == '/' {
+                let component = &self.rest[self.position..search_start + i + 1];
+                self.position = search_start + i + 1;
+                return Some(component);
+            }
+        }
+
+        // Last component (no trailing slash)
+        if self.position < self.rest.len() {
+            let component = &self.rest[self.position..];
+            self.done = true;
+            return Some(component);
+        }
+
+        self.done = true;
+        None
+    }
+}
+
 /// Splits a URI into its scheme and hierarchical components.
-/// Returns (scheme_with_separator, components) where scheme includes "://" if present.
-/// For path-only URIs (no scheme), returns (None, components).
-pub(crate) fn split_uri(uri: &str) -> (Option<&str>, Vec<&str>) {
+/// Returns a structure that provides the scheme (if present) and allows
+/// iteration over components without allocation.
+pub(crate) fn split_uri(uri: &str) -> URIComponents<'_> {
     // Check if this is a URI with a scheme
     if let Some(scheme_end) = uri.find("://") {
         let scheme = &uri[..scheme_end + 3]; // Include "://"
-        let rest = &uri[scheme_end + 3..];
-
-        if rest.is_empty() {
-            return (Some(scheme), vec![]);
-        }
-
-        let mut components = vec![];
-        let mut start = 0;
-        for (i, ch) in rest.char_indices() {
-            if ch == '/' {
-                components.push(&rest[start..=i]);
-                start = i + 1;
-            }
-        }
-
-        if start < rest.len() {
-            components.push(&rest[start..]);
-        }
-
-        return (Some(scheme), components);
+        return URIComponents {
+            uri,
+            scheme: Some(scheme),
+            rest_start: scheme_end + 3,
+        };
     }
 
     // No scheme found - treat as path-only URI
-    if uri.is_empty() {
-        return (None, vec![]);
+    URIComponents {
+        uri,
+        scheme: None,
+        rest_start: 0,
     }
-
-    let mut components = vec![];
-    let mut start = 0;
-
-    // Handle absolute paths that start with '/'
-    let path_start = if uri.starts_with('/') { 1 } else { 0 };
-    let path = &uri[path_start..];
-
-    // If it was an absolute path, add the leading slash as the first component
-    if path_start == 1 && !path.is_empty() {
-        components.push("/");
-    } else if path_start == 1 && path.is_empty() {
-        // Just a single "/"
-        return (None, vec!["./"]);
-    }
-
-    // Split the rest of the path
-    if !path.is_empty() {
-        for (i, ch) in path.char_indices() {
-            if ch == '/' {
-                if start < i {
-                    components.push(&path[start..=i]);
-                } else if start == i {
-                    // Double slash - preserve it
-                    components.push(&path[i..=i]);
-                }
-                start = i + 1;
-            }
-        }
-
-        if start < path.len() {
-            components.push(&path[start..]);
-        } else if start == path.len() && path.ends_with('/') {
-            // Already handled by including the slash in the previous component
-        }
-    }
-
-    // If we have no components, treat it as current directory
-    if components.is_empty() && !uri.is_empty() {
-        components.push(uri);
-    }
-
-    (None, components)
 }
 
 /// Performs XOR operation in-place on data using a keystream.
@@ -156,16 +233,8 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// );
 /// ```
 pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
-    let (scheme, uri_parts) = split_uri(uri);
-
-    // If no components, return empty string
-    if uri_parts.is_empty() {
-        // If there was a scheme but no components, return just the scheme
-        if let Some(scheme) = scheme {
-            return scheme.to_string();
-        }
-        return String::new();
-    }
+    let components = split_uri(uri);
+    let scheme = components.scheme();
 
     let mut encrypted_uri = Vec::with_capacity(uri.len() * 2);
 
@@ -181,7 +250,8 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
     let mut base_keystream_hasher = base_hasher.clone();
     base_keystream_hasher.update(b"KS");
 
-    for part in uri_parts {
+    // Iterate directly over components without collecting
+    for part in components {
         let part_bytes = part.as_bytes();
 
         // Calculate padding for base64 alignment
@@ -242,11 +312,12 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
 ///
 /// # Errors
 ///
-/// Will return an error if:
-/// - The base64 encoding is invalid
-/// - The encrypted data is malformed
-/// - Authentication fails (wrong key/context)
-/// - No valid components can be recovered
+/// Returns `Err("Decryption failed")` for ALL failure cases to prevent
+/// timing and padding oracle attacks. This includes:
+/// - Invalid base64 encoding
+/// - Malformed encrypted data
+/// - Authentication failures (wrong key/context)
+/// - Invalid format
 ///
 /// # Example
 ///
@@ -300,14 +371,14 @@ pub fn decrypt_uri(
 
         (Some(scheme), encrypted)
     } else {
-        // Invalid format - neither starts with '/' nor contains '://'
-        return Err("Invalid encrypted URI format: must start with '/' for paths or contain '://' for URIs with schemes".to_string());
+        // Invalid format - use generic error to prevent oracle attacks
+        return Err("Decryption failed".to_string());
     };
 
     // Decode the encrypted part
     let encrypted_bytes = URL_SAFE_NO_PAD
         .decode(encrypted_part)
-        .map_err(|e| format!("Invalid base64: {}", e))?;
+        .map_err(|_| "Decryption failed".to_string())?;
 
     let mut decrypted_components = Vec::<String>::new();
     let mut pos = 0;
@@ -328,7 +399,7 @@ pub fn decrypt_uri(
 
     while pos < encrypted_bytes.len() {
         if pos + SIV_SIZE > encrypted_bytes.len() {
-            return Err("Malformed encrypted data: incomplete SIV".to_string());
+            return Err("Decryption failed".to_string());
         }
 
         let siv = &encrypted_bytes[pos..pos + SIV_SIZE];
@@ -364,12 +435,12 @@ pub fn decrypt_uri(
 
                 for _ in 0..padding_needed {
                     if pos >= encrypted_bytes.len() {
-                        return Err("Authentication failed".to_string());
+                        return Err("Decryption failed".to_string());
                     }
                     let mut keystream_byte = [0u8; 1];
                     reader.read(&mut keystream_byte);
                     if (encrypted_bytes[pos] ^ keystream_byte[0]) != 0 {
-                        return Err("Authentication failed".to_string());
+                        return Err("Decryption failed".to_string());
                     }
                     pos += 1;
                 }
@@ -379,7 +450,7 @@ pub fn decrypt_uri(
 
         // Validate the component
         if component.is_empty() {
-            return Err("Authentication failed".to_string());
+            return Err("Decryption failed".to_string());
         }
 
         // Update the hasher with this component's data
@@ -394,7 +465,7 @@ pub fn decrypt_uri(
 
         // Verify the SIV matches - this ensures proper chaining
         if expected_siv != siv {
-            return Err("Authentication failed".to_string());
+            return Err("Decryption failed".to_string());
         }
 
         // Check UTF-8 validity
@@ -404,13 +475,13 @@ pub fn decrypt_uri(
             }
             Err(_) => {
                 // Invalid UTF-8 means decryption failed
-                return Err("Authentication failed".to_string());
+                return Err("Decryption failed".to_string());
             }
         }
     }
 
     if decrypted_components.is_empty() {
-        return Err("Authentication failed".to_string());
+        return Err("Decryption failed".to_string());
     }
 
     // Join all decrypted components

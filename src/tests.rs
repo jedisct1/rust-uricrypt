@@ -7,58 +7,66 @@ use sha3::{
 
 #[test]
 fn test_basic_uri() {
-    let (scheme, components) = split_uri("https://example.com");
-    assert_eq!(scheme, Some("https://"));
-    assert_eq!(components, vec!["example.com"]);
+    let components = split_uri("https://example.com");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com"]);
 }
 
 #[test]
 fn test_path_only_absolute() {
-    let (scheme, components) = split_uri("/path/to/file");
-    assert_eq!(scheme, None);
-    assert_eq!(components, vec!["/", "path/", "to/", "file"]);
+    let components = split_uri("/path/to/file");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["/", "path/", "to/", "file"]);
 }
 
 #[test]
 fn test_path_only_relative() {
-    let (scheme, components) = split_uri("path/to/file");
-    assert_eq!(scheme, None);
-    assert_eq!(components, vec!["path/", "to/", "file"]);
+    let components = split_uri("path/to/file");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["path/", "to/", "file"]);
 }
 
 #[test]
 fn test_path_only_single_slash() {
-    let (scheme, components) = split_uri("/");
-    assert_eq!(scheme, None);
-    assert_eq!(components, vec!["./"]);
+    let components = split_uri("/");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["./"]);
 }
 
 #[test]
 fn test_path_only_single_component() {
-    let (scheme, components) = split_uri("file.txt");
-    assert_eq!(scheme, None);
-    assert_eq!(components, vec!["file.txt"]);
+    let components = split_uri("file.txt");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["file.txt"]);
 }
 
 #[test]
 fn test_uri_with_trailing_slash() {
-    let (scheme, components) = split_uri("https://example.com/");
-    assert_eq!(scheme, Some("https://"));
-    assert_eq!(components, vec!["example.com/"]);
+    let components = split_uri("https://example.com/");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com/"]);
 }
 
 #[test]
 fn test_uri_with_path() {
-    let (scheme, components) = split_uri("https://example.com/a/b/c");
-    assert_eq!(scheme, Some("https://"));
-    assert_eq!(components, vec!["example.com/", "a/", "b/", "c"]);
+    let components = split_uri("https://example.com/a/b/c");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com/", "a/", "b/", "c"]);
 }
 
 #[test]
 fn test_uri_with_path_and_trailing_slash() {
-    let (scheme, components) = split_uri("https://example.com/a/b/c/");
-    assert_eq!(scheme, Some("https://"));
-    assert_eq!(components, vec!["example.com/", "a/", "b/", "c/"]);
+    let components = split_uri("https://example.com/a/b/c/");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com/", "a/", "b/", "c/"]);
 }
 
 #[test]
@@ -287,7 +295,7 @@ fn test_decrypt_wrong_key() {
 
     assert!(result.is_err(), "Decryption should fail with wrong key");
     if result.is_err() {
-        assert!(result.unwrap_err().contains("Authentication failed"));
+        assert!(result.unwrap_err().contains("Decryption failed"));
     }
 }
 
@@ -295,7 +303,8 @@ fn test_decrypt_wrong_key() {
 fn test_decrypt_invalid_base64() {
     let result = decrypt_uri("https://not@valid#base64", b"key", b"ctx");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Invalid base64"));
+    // All decryption errors now return the same message to prevent oracle attacks
+    assert!(result.unwrap_err().contains("Decryption failed"));
 }
 
 #[test]
@@ -637,7 +646,7 @@ fn test_path_only_wrong_key() {
     let result = decrypt_uri(&encrypted, decrypt_key, context);
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Authentication failed"));
+    assert!(result.unwrap_err().contains("Decryption failed"));
 }
 
 #[test]
@@ -647,7 +656,8 @@ fn test_invalid_encrypted_format() {
     let result = decrypt_uri(invalid_encrypted, b"key", b"ctx");
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Invalid encrypted URI format"));
+    // All decryption errors now return the same message to prevent oracle attacks
+    assert!(result.unwrap_err().contains("Decryption failed"));
 }
 
 #[test]
@@ -689,60 +699,9 @@ fn test_decrypt_corrupted_component() {
         "Decryption should fail when a component is corrupted"
     );
     assert!(
-        result.unwrap_err().contains("Authentication failed"),
+        result.unwrap_err().contains("Decryption failed"),
         "Error message should indicate authentication failure"
     );
-}
-
-#[test]
-#[should_panic(expected = "Key validation failed: both halves of the key are identical")]
-fn test_encrypt_with_identical_key_halves_panics() {
-    let uri = "https://example.com/path";
-    let bad_key = b"same_halfsame_half"; // 18 bytes total, both halves are "same_half"
-    let context = b"test";
-
-    // This should panic
-    encrypt_uri(uri, bad_key, context);
-}
-
-#[test]
-fn test_decrypt_with_identical_key_halves_returns_error() {
-    let encrypted = "https://fakefakefake"; // Doesn't matter, won't get to decryption
-    let bad_key = b"abcd1234abcd1234"; // 16 bytes total, both halves are "abcd1234"
-    let context = b"test";
-
-    let result = decrypt_uri(encrypted, bad_key, context);
-    assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err(),
-        "Key validation failed: both halves of the key are identical"
-    );
-}
-
-#[test]
-fn test_odd_length_key_not_checked_for_identical_halves() {
-    let uri = "https://example.com/path";
-    let odd_key = b"abcdefghijklmno"; // 15 bytes - odd length, won't be checked
-    let context = b"test";
-
-    // Should not panic since odd-length keys aren't checked
-    let encrypted = encrypt_uri(uri, odd_key, context);
-    assert!(!encrypted.is_empty());
-
-    // Should decrypt successfully
-    let decrypted = decrypt_uri(&encrypted, odd_key, context).unwrap();
-    assert_eq!(uri, decrypted);
-}
-
-#[test]
-fn test_different_halves_key_works() {
-    let uri = "https://example.com/path";
-    let good_key = b"first_halfother_half"; // Different halves
-    let context = b"test";
-
-    let encrypted = encrypt_uri(uri, good_key, context);
-    let decrypted = decrypt_uri(&encrypted, good_key, context).unwrap();
-    assert_eq!(uri, decrypted);
 }
 
 #[test]
@@ -797,7 +756,7 @@ fn test_decrypt_tampered_multi_component() {
         "Decryption should fail when components are tampered"
     );
     assert!(
-        result.unwrap_err().contains("Authentication failed"),
+        result.unwrap_err().contains("Decryption failed"),
         "Error message should indicate authentication failure"
     );
 }
