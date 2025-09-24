@@ -70,6 +70,49 @@ fn test_uri_with_path_and_trailing_slash() {
 }
 
 #[test]
+fn test_uri_with_query_params() {
+    let components = split_uri("https://example.com/path?foo=bar&baz=qux");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com/", "path?", "foo=bar&baz=qux"]);
+}
+
+#[test]
+fn test_uri_with_fragment() {
+    let components = split_uri("https://example.com/path#section");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["example.com/", "path#", "section"]);
+}
+
+#[test]
+fn test_uri_with_query_and_fragment() {
+    let components = split_uri("https://example.com/path?query=value#section");
+    assert_eq!(components.scheme(), Some("https://"));
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(
+        parts,
+        vec!["example.com/", "path?", "query=value#", "section"]
+    );
+}
+
+#[test]
+fn test_path_with_query_params() {
+    let components = split_uri("/path/to/file?param=value");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["/", "path/", "to/", "file?", "param=value"]);
+}
+
+#[test]
+fn test_path_with_fragment() {
+    let components = split_uri("/path/to/file#anchor");
+    assert_eq!(components.scheme(), None);
+    let parts: Vec<_> = components.into_iter().collect();
+    assert_eq!(parts, vec!["/", "path/", "to/", "file#", "anchor"]);
+}
+
+#[test]
 fn test_encrypt_uri_basic() {
     let uri = "https://example.com";
     let secret_key = b"test_key";
@@ -263,6 +306,19 @@ fn test_round_trip_various_uris() {
         "https://example.com/path/",
         "https://example.com/a/b/c/d/e",
         "https://subdomain.example.com/path/to/resource",
+        // URIs with query parameters
+        "https://example.com?query=value",
+        "https://example.com/path?foo=bar",
+        "https://example.com/path?foo=bar&baz=qux",
+        "https://example.com/path/file?param1=value1&param2=value2",
+        // URIs with fragments
+        "https://example.com#section",
+        "https://example.com/path#heading",
+        "https://example.com/path/file#anchor",
+        // URIs with both query and fragment
+        "https://example.com?query=value#section",
+        "https://example.com/path?foo=bar#heading",
+        "https://example.com/path/file?param1=value1&param2=value2#anchor",
     ];
 
     let secret_key = b"my_secret_key";

@@ -115,9 +115,22 @@ impl<'a> Iterator for URIComponentIterator<'a> {
             return None;
         }
 
-        // Find next component ending with '/'
-        if let Some(slash_pos) = self.rest[self.position..].find('/') {
-            let end = self.position + slash_pos + 1;
+        // Find next component ending with '/', '?', or '#'
+        let remaining = &self.rest[self.position..];
+        let mut end_pos = None;
+        let mut include_terminator = false;
+
+        // Find the nearest terminator ('/', '?', or '#')
+        for (i, ch) in remaining.chars().enumerate() {
+            if ch == '/' || ch == '?' || ch == '#' {
+                end_pos = Some(i);
+                include_terminator = true;
+                break;
+            }
+        }
+
+        if let Some(pos) = end_pos {
+            let end = self.position + pos + if include_terminator { 1 } else { 0 };
             let component = &self.rest[self.position..end];
             self.position = end;
             return Some(component);
@@ -404,7 +417,8 @@ pub fn decrypt_uri(
 
             component.push(decrypted_byte);
 
-            if decrypted_byte == b'/' {
+            // Check if this byte is a terminator ('/', '?', or '#')
+            if decrypted_byte == b'/' || decrypted_byte == b'?' || decrypted_byte == b'#' {
                 let bytes_read = pos - component_start;
                 let total_len = SIV_SIZE + bytes_read;
                 let padding_needed = (3 - (total_len % 3)) % 3;
