@@ -34,7 +34,7 @@ fn test_path_only_single_slash() {
     let components = split_uri("/");
     assert_eq!(components.scheme(), None);
     let parts: Vec<_> = components.into_iter().collect();
-    assert_eq!(parts, vec!["./"]);
+    assert_eq!(parts, vec!["/"]);
 }
 
 #[test]

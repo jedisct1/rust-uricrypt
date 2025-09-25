@@ -32,50 +32,23 @@ impl<'a> IntoIterator for URIComponents<'a> {
                 rest: "",
                 position: 0,
                 done: true,
-                is_absolute_path: false,
-                initial_slash_handled: false,
             };
         }
 
-        // For path-only URIs
+        // For path-only URIs (no scheme), use the entire URI
         if self.scheme.is_none() {
-            // Handle absolute paths that start with '/'
-            if self.uri.starts_with('/') {
-                if self.uri.len() == 1 {
-                    // Just a single "/"
-                    return URIComponentIterator {
-                        rest: "./",
-                        position: 0,
-                        done: false,
-                        is_absolute_path: false,     // Special case
-                        initial_slash_handled: true, // Don't emit "/" for this case
-                    };
-                }
-                return URIComponentIterator {
-                    rest: &self.uri[1..], // Skip leading '/'
-                    position: 0,
-                    done: false,
-                    is_absolute_path: true,
-                    initial_slash_handled: false, // Will emit "/" as first component
-                };
-            }
-            // Relative path - no leading slash to handle
             return URIComponentIterator {
                 rest: self.uri,
                 position: 0,
                 done: false,
-                is_absolute_path: false,
-                initial_slash_handled: true, // No slash to emit
             };
         }
 
-        // URI with scheme - just iterate over rest
+        // URI with scheme - iterate over rest
         URIComponentIterator {
             rest,
             position: 0,
             done: false,
-            is_absolute_path: false,
-            initial_slash_handled: true, // No initial slash for scheme URIs
         }
     }
 }
@@ -85,8 +58,6 @@ pub(crate) struct URIComponentIterator<'a> {
     rest: &'a str,
     position: usize,
     done: bool,
-    is_absolute_path: bool,
-    initial_slash_handled: bool,
 }
 
 impl<'a> Iterator for URIComponentIterator<'a> {
@@ -95,19 +66,6 @@ impl<'a> Iterator for URIComponentIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
             return None;
-        }
-
-        // Handle leading slash for absolute paths
-        if self.is_absolute_path && !self.initial_slash_handled {
-            self.initial_slash_handled = true;
-            // Emit "/" as the first component for absolute paths
-            return Some("/");
-        }
-
-        // Special case for single "/"
-        if self.rest == "./" && !self.initial_slash_handled {
-            self.done = true;
-            return Some("./");
         }
 
         if self.position >= self.rest.len() {
