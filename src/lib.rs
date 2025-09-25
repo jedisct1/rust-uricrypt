@@ -157,8 +157,8 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// prefixes. Each component is authenticated with a Synthetic Initialization Vector (SIV)
 /// computed from the accumulated hasher state of all previous components.
 ///
-/// For path-only URIs (no scheme), the entire path is encrypted and returned as
-/// base64-encoded ciphertext.
+/// For path-only URIs (no scheme), returns just the base64-encoded ciphertext
+/// without any prefix.
 ///
 /// # Arguments
 ///
@@ -169,7 +169,7 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// # Returns
 ///
 /// A string with the plaintext scheme (if present) followed by URL-safe base64 encoded encrypted components.
-/// For path-only URIs, returns just the base64-encoded encrypted path.
+/// For path-only URIs, returns just the base64-encoded ciphertext.
 ///
 /// # Security
 ///
@@ -242,15 +242,17 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
         encrypted_uri.extend_from_slice(&encrypted_part);
     }
 
-    let prefix = scheme.unwrap_or("/");
-    format!("{}{}", prefix, URL_SAFE_NO_PAD.encode(encrypted_uri))
+    match scheme {
+        Some(s) => format!("{}{}", s, URL_SAFE_NO_PAD.encode(encrypted_uri)),
+        None => URL_SAFE_NO_PAD.encode(encrypted_uri)
+    }
 }
 
 /// Decrypts a URI that was encrypted with `encrypt_uri`.
 ///
 /// Expects either:
 /// - A URI with a plaintext scheme followed by base64-encoded encrypted components
-/// - A path-only URI that is entirely base64-encoded
+/// - A base64-encoded string (for path-only URIs with no scheme)
 ///
 /// Validates the authentication tags (SIVs) for each component (computed from
 /// accumulated hasher state) to ensure integrity and authenticity before returning
@@ -312,9 +314,7 @@ pub fn decrypt_uri(
     secret_key: &[u8],
     context: &[u8],
 ) -> Result<String, String> {
-    let (scheme, encrypted_part) = if let Some(stripped) = encrypted_uri.strip_prefix('/') {
-        (None, stripped)
-    } else if let Some(scheme_end) = encrypted_uri.find("://") {
+    let (scheme, encrypted_part) = if let Some(scheme_end) = encrypted_uri.find("://") {
         let scheme = &encrypted_uri[..scheme_end + 3];
         let encrypted = &encrypted_uri[scheme_end + 3..];
 
@@ -324,7 +324,8 @@ pub fn decrypt_uri(
 
         (Some(scheme), encrypted)
     } else {
-        return Err("Decryption failed".to_string());
+        // No scheme found, treat entire string as encrypted path
+        (None, encrypted_uri)
     };
 
     let encrypted_bytes = URL_SAFE_NO_PAD
