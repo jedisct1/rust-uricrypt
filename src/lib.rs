@@ -150,6 +150,12 @@ pub(crate) fn xor_in_place(data: &mut [u8], keystream: &[u8]) {
 /// Used for authentication tags on each URI component.
 pub(crate) const SIV_SIZE: usize = 16;
 
+/// Padding block size for ciphertext.
+///
+/// The total length of SIV + encrypted component is padded to be a multiple
+/// of this value to ensure consistent base64 encoding without padding characters.
+pub(crate) const PADBS: usize = 3;
+
 /// Encrypts a URI while preserving its hierarchical structure and scheme.
 ///
 /// This function keeps the URI scheme (e.g., "https://") in plaintext and encrypts
@@ -220,7 +226,7 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
         let part_bytes = part.as_bytes();
 
         let total_unpadded = SIV_SIZE + part_bytes.len();
-        let padding = (3 - (total_unpadded % 3)) % 3;
+        let padding = (PADBS - (total_unpadded % PADBS)) % PADBS;
 
         components_hasher.update(part_bytes);
 
@@ -244,7 +250,7 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
 
     match scheme {
         Some(s) => format!("{}{}", s, URL_SAFE_NO_PAD.encode(encrypted_uri)),
-        None => format!("/{}", URL_SAFE_NO_PAD.encode(encrypted_uri))
+        None => format!("/{}", URL_SAFE_NO_PAD.encode(encrypted_uri)),
     }
 }
 
@@ -382,7 +388,7 @@ pub fn decrypt_uri(
             if decrypted_byte == b'/' || decrypted_byte == b'?' || decrypted_byte == b'#' {
                 let bytes_read = pos - component_start;
                 let total_len = SIV_SIZE + bytes_read;
-                let padding_needed = (3 - (total_len % 3)) % 3;
+                let padding_needed = (PADBS - (total_len % PADBS)) % PADBS;
                 pos += padding_needed;
                 break;
             }

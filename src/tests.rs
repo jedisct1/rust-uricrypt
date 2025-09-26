@@ -133,8 +133,8 @@ fn test_encrypt_uri_basic() {
     // Check that there are no padding characters
     assert!(!encrypted_part.contains('='));
 
-    // Check length with new padding scheme (SIV + component must be multiple of 3):
-    // "example.com" = 11 bytes, SIV = 16 bytes, total = 27 bytes (divisible by 3)
+    // Check length with new padding scheme (SIV + component must be multiple of PADBS):
+    // "example.com" = 11 bytes, SIV = 16 bytes, total = 27 bytes (divisible by PADBS)
     // Base64 encoding: 27 bytes * 4/3 = 36 base64 chars
     assert_eq!(encrypted_part.len(), 36);
 }
@@ -201,7 +201,7 @@ fn test_prefix_preservation() {
     // Calculate expected prefix lengths with new padding scheme
     // They share: "example.com/" (12 bytes) and "path/" (5 bytes) and "to/" (3 bytes)
     // Component 1: "example.com/" = 12 bytes, SIV = 16, total = 28, need 2 padding -> 30 bytes
-    // Component 2: "path/" = 5 bytes, SIV = 16, total = 21 (divisible by 3) -> 21 bytes
+    // Component 2: "path/" = 5 bytes, SIV = 16, total = 21 (divisible by PADBS) -> 21 bytes
     // Component 3: "to/" = 3 bytes, SIV = 16, total = 19, need 2 padding -> 21 bytes
     // Total shared prefix in bytes: 30 + 21 + 21 = 72 bytes
     // In base64: 72 bytes * 4/3 = 96 base64 characters
@@ -431,7 +431,7 @@ fn test_component_reordering_attack() {
                     let component_start = boundaries.last().unwrap() + SIV_SIZE;
                     let bytes_read = pos - component_start;
                     let total_len = SIV_SIZE + bytes_read;
-                    let padding = (3 - (total_len % 3)) % 3;
+                    let padding = (PADBS - (total_len % PADBS)) % PADBS;
 
                     for _ in 0..padding {
                         if pos >= encrypted_bytes.len() {
@@ -667,7 +667,7 @@ fn test_path_only_prefix_preservation() {
     // They share: "/" (1 byte), "shared/" (7 bytes), and "path/" (5 bytes)
     // Component 1: "/" = 1 byte, SIV = 16, total = 17, need 1 padding -> 18 bytes
     // Component 2: "shared/" = 7 bytes, SIV = 16, total = 23, need 1 padding -> 24 bytes
-    // Component 3: "path/" = 5 bytes, SIV = 16, total = 21 (divisible by 3) -> 21 bytes
+    // Component 3: "path/" = 5 bytes, SIV = 16, total = 21 (divisible by PADBS) -> 21 bytes
     let shared_len_1_2 = 18 + 24 + 21; // 63 bytes
 
     assert_eq!(
@@ -700,25 +700,52 @@ fn test_path_only_prefix_behavior() {
     // Test absolute path gets "/" prefix
     let abs_path = "/path/to/file";
     let encrypted_abs = encrypt_uri(abs_path, secret_key, context);
-    assert!(encrypted_abs.starts_with('/'), "Absolute path encryption should start with '/'");
-    assert!(!encrypted_abs.contains("://"), "Should not contain scheme delimiter");
+    assert!(
+        encrypted_abs.starts_with('/'),
+        "Absolute path encryption should start with '/'"
+    );
+    assert!(
+        !encrypted_abs.contains("://"),
+        "Should not contain scheme delimiter"
+    );
 
     // Test relative path gets "/" prefix
     let rel_path = "path/to/file";
     let encrypted_rel = encrypt_uri(rel_path, secret_key, context);
-    assert!(encrypted_rel.starts_with('/'), "Relative path encryption should start with '/'");
-    assert!(!encrypted_rel.contains("://"), "Should not contain scheme delimiter");
+    assert!(
+        encrypted_rel.starts_with('/'),
+        "Relative path encryption should start with '/'"
+    );
+    assert!(
+        !encrypted_rel.contains("://"),
+        "Should not contain scheme delimiter"
+    );
 
     // Test single file gets "/" prefix
     let single = "file.txt";
     let encrypted_single = encrypt_uri(single, secret_key, context);
-    assert!(encrypted_single.starts_with('/'), "Single file encryption should start with '/'");
-    assert!(!encrypted_single.contains("://"), "Should not contain scheme delimiter");
+    assert!(
+        encrypted_single.starts_with('/'),
+        "Single file encryption should start with '/'"
+    );
+    assert!(
+        !encrypted_single.contains("://"),
+        "Should not contain scheme delimiter"
+    );
 
     // Test decryption works with "/" prefix
-    assert_eq!(decrypt_uri(&encrypted_abs, secret_key, context).unwrap(), abs_path);
-    assert_eq!(decrypt_uri(&encrypted_rel, secret_key, context).unwrap(), rel_path);
-    assert_eq!(decrypt_uri(&encrypted_single, secret_key, context).unwrap(), single);
+    assert_eq!(
+        decrypt_uri(&encrypted_abs, secret_key, context).unwrap(),
+        abs_path
+    );
+    assert_eq!(
+        decrypt_uri(&encrypted_rel, secret_key, context).unwrap(),
+        rel_path
+    );
+    assert_eq!(
+        decrypt_uri(&encrypted_single, secret_key, context).unwrap(),
+        single
+    );
 
     // Test that decryption fails without "/" prefix (no backward compatibility)
     let base64_only = &encrypted_abs[1..]; // Remove the "/" prefix
