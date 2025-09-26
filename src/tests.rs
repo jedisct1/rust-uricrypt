@@ -603,11 +603,11 @@ fn test_path_only_encryption() {
     let path1 = "/path/to/file";
     let encrypted1 = encrypt_uri(path1, secret_key, context);
 
-    // Should be pure base64 (no prefix)
-    assert!(!encrypted1.starts_with('/'));
+    // Should start with '/' prefix
+    assert!(encrypted1.starts_with('/'));
     assert!(!encrypted1.contains("://"));
-    // Check that it's valid base64
-    assert!(encrypted1
+    // Check that after '/' it's valid base64
+    assert!(encrypted1[1..]
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
 
@@ -619,7 +619,7 @@ fn test_path_only_encryption() {
     let path2 = "path/to/file";
     let encrypted2 = encrypt_uri(path2, secret_key, context);
 
-    assert!(!encrypted2.starts_with('/'));
+    assert!(encrypted2.starts_with('/'));
     assert!(!encrypted2.contains("://"));
 
     let decrypted2 = decrypt_uri(&encrypted2, secret_key, context).unwrap();
@@ -629,7 +629,7 @@ fn test_path_only_encryption() {
     let path3 = "file.txt";
     let encrypted3 = encrypt_uri(path3, secret_key, context);
 
-    assert!(!encrypted3.starts_with('/'));
+    assert!(encrypted3.starts_with('/'));
     assert!(!encrypted3.contains("://"));
 
     let decrypted3 = decrypt_uri(&encrypted3, secret_key, context).unwrap();
@@ -650,18 +650,18 @@ fn test_path_only_prefix_preservation() {
     let enc2 = encrypt_uri(path2, secret_key, context);
     let enc3 = encrypt_uri(path3, secret_key, context);
 
-    // All should be pure base64 (no scheme, no prefix)
-    assert!(!enc1.starts_with('/'));
-    assert!(!enc2.starts_with('/'));
-    assert!(!enc3.starts_with('/'));
+    // All should have '/' prefix
+    assert!(enc1.starts_with('/'));
+    assert!(enc2.starts_with('/'));
+    assert!(enc3.starts_with('/'));
     assert!(!enc1.contains("://"));
     assert!(!enc2.contains("://"));
     assert!(!enc3.contains("://"));
 
-    // Decode to compare prefixes (no prefix to skip)
-    let bytes1 = URL_SAFE_NO_PAD.decode(&enc1).unwrap();
-    let bytes2 = URL_SAFE_NO_PAD.decode(&enc2).unwrap();
-    let bytes3 = URL_SAFE_NO_PAD.decode(&enc3).unwrap();
+    // Decode to compare prefixes (skip '/' prefix)
+    let bytes1 = URL_SAFE_NO_PAD.decode(&enc1[1..]).unwrap();
+    let bytes2 = URL_SAFE_NO_PAD.decode(&enc2[1..]).unwrap();
+    let bytes3 = URL_SAFE_NO_PAD.decode(&enc3[1..]).unwrap();
 
     // Calculate expected shared prefix for path1 and path2
     // They share: "/" (1 byte), "shared/" (7 bytes), and "path/" (5 bytes)
@@ -692,6 +692,41 @@ fn test_path_only_prefix_preservation() {
 }
 
 #[test]
+fn test_path_only_prefix_behavior() {
+    // Test that path-only URIs now have "/" prefix
+    let secret_key = b"test_key";
+    let context = b"test_context";
+
+    // Test absolute path gets "/" prefix
+    let abs_path = "/path/to/file";
+    let encrypted_abs = encrypt_uri(abs_path, secret_key, context);
+    assert!(encrypted_abs.starts_with('/'), "Absolute path encryption should start with '/'");
+    assert!(!encrypted_abs.contains("://"), "Should not contain scheme delimiter");
+
+    // Test relative path gets "/" prefix
+    let rel_path = "path/to/file";
+    let encrypted_rel = encrypt_uri(rel_path, secret_key, context);
+    assert!(encrypted_rel.starts_with('/'), "Relative path encryption should start with '/'");
+    assert!(!encrypted_rel.contains("://"), "Should not contain scheme delimiter");
+
+    // Test single file gets "/" prefix
+    let single = "file.txt";
+    let encrypted_single = encrypt_uri(single, secret_key, context);
+    assert!(encrypted_single.starts_with('/'), "Single file encryption should start with '/'");
+    assert!(!encrypted_single.contains("://"), "Should not contain scheme delimiter");
+
+    // Test decryption works with "/" prefix
+    assert_eq!(decrypt_uri(&encrypted_abs, secret_key, context).unwrap(), abs_path);
+    assert_eq!(decrypt_uri(&encrypted_rel, secret_key, context).unwrap(), rel_path);
+    assert_eq!(decrypt_uri(&encrypted_single, secret_key, context).unwrap(), single);
+
+    // Test that decryption fails without "/" prefix (no backward compatibility)
+    let base64_only = &encrypted_abs[1..]; // Remove the "/" prefix
+    let result = decrypt_uri(base64_only, secret_key, context);
+    assert!(result.is_err(), "Should fail without '/' prefix");
+}
+
+#[test]
 fn test_path_only_wrong_key() {
     let path = "/secret/path/file.txt";
     let encrypt_key = b"key1";
@@ -708,12 +743,18 @@ fn test_path_only_wrong_key() {
 #[test]
 fn test_invalid_encrypted_format() {
     // Test that invalid base64 strings are rejected
-    let invalid_encrypted = "not@valid#base64";
+    let invalid_encrypted = "/not@valid#base64";
     let result = decrypt_uri(invalid_encrypted, b"key", b"ctx");
 
     assert!(result.is_err());
     // All decryption errors now return the same message to prevent oracle attacks
     assert!(result.unwrap_err().contains("Decryption failed"));
+
+    // Test that path-only without "/" prefix is rejected
+    let no_prefix = "validBase64String";
+    let result2 = decrypt_uri(no_prefix, b"key", b"ctx");
+    assert!(result2.is_err());
+    assert!(result2.unwrap_err().contains("Decryption failed"));
 }
 
 #[test]

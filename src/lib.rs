@@ -157,8 +157,8 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// prefixes. Each component is authenticated with a Synthetic Initialization Vector (SIV)
 /// computed from the accumulated hasher state of all previous components.
 ///
-/// For path-only URIs (no scheme), returns just the base64-encoded ciphertext
-/// without any prefix.
+/// For path-only URIs (no scheme), returns a "/" prefix followed by the base64-encoded
+/// ciphertext.
 ///
 /// # Arguments
 ///
@@ -169,7 +169,7 @@ pub(crate) const SIV_SIZE: usize = 16;
 /// # Returns
 ///
 /// A string with the plaintext scheme (if present) followed by URL-safe base64 encoded encrypted components.
-/// For path-only URIs, returns just the base64-encoded ciphertext.
+/// For path-only URIs, returns "/" followed by the base64-encoded ciphertext.
 ///
 /// # Security
 ///
@@ -244,7 +244,7 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
 
     match scheme {
         Some(s) => format!("{}{}", s, URL_SAFE_NO_PAD.encode(encrypted_uri)),
-        None => URL_SAFE_NO_PAD.encode(encrypted_uri)
+        None => format!("/{}", URL_SAFE_NO_PAD.encode(encrypted_uri))
     }
 }
 
@@ -252,7 +252,7 @@ pub fn encrypt_uri(uri: &str, secret_key: &[u8], context: &[u8]) -> String {
 ///
 /// Expects either:
 /// - A URI with a plaintext scheme followed by base64-encoded encrypted components
-/// - A base64-encoded string (for path-only URIs with no scheme)
+/// - A "/" prefix followed by base64-encoded string (for path-only URIs with no scheme)
 ///
 /// Validates the authentication tags (SIVs) for each component (computed from
 /// accumulated hasher state) to ensure integrity and authenticity before returning
@@ -323,9 +323,11 @@ pub fn decrypt_uri(
         }
 
         (Some(scheme), encrypted)
+    } else if encrypted_uri.starts_with("/") {
+        // Path-only URI with "/" prefix
+        (None, &encrypted_uri[1..])
     } else {
-        // No scheme found, treat entire string as encrypted path
-        (None, encrypted_uri)
+        return Err("Decryption failed".to_string());
     };
 
     let encrypted_bytes = URL_SAFE_NO_PAD
