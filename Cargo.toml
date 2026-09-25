@@ -1,6 +1,6 @@
 [package]
 name = "uricrypt"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 authors = ["Frank Denis <github@pureftpd.org>"]
 description = "Deterministic URI and URL encryption that preserves shared path prefixes and hierarchy, with authenticated components"
