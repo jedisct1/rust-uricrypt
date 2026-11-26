@@ -6,7 +6,6 @@ authors = ["Frank Denis <github@pureftpd.org>"]
 description = "Deterministic URI and URL encryption that preserves shared path prefixes and hierarchy, with authenticated components"
 keywords = ["uri", "url", "encryption", "prefix-preserving", "deterministic"]
 license = "MIT"
-homepage = "https://github.com/jedisct1/rust-uricrypt"
 repository = "https://github.com/jedisct1/rust-uricrypt"
 categories = ["cryptography"]
 readme = "README.md"
